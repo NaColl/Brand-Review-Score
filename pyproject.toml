@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "brand-review-score"
+version = "1.0.0"
+description = "Brand Sentiment Score (BSS) — a multi-dimensional scoring engine that predicts brand popularity and stock price movements from free public data sources."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Brand Review Score Contributors"}
+]
+
+dependencies = [
+    "praw>=7.7",
+    "pytrends>=4.9",
+    "yfinance>=0.2",
+    "feedparser>=6.0",
+    "vaderSentiment>=3.3",
+    "textblob>=0.18",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+    "click>=8.1",
+    "requests>=2.31",
+    "python-dateutil>=2.8",
+]
+
+[project.optional-dependencies]
+transformers = [
+    "transformers>=4.30",
+    "torch>=2.0",
+]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "pytest-mock>=3.11",
+]
+
+[project.scripts]
+bss = "cli:main"
+
+[tool.setuptools.packages.find]
+include = ["src*", "config*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

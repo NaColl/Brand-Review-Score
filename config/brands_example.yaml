@@ -1,0 +1,52 @@
+# Example brand configuration file
+# Copy to brands.yaml and customize for your analysis
+
+brands:
+  - name: "Tesla"
+    ticker: "TSLA"                    # Stock ticker (omit for private companies)
+    wikipedia_article: "Tesla,_Inc."  # Wikipedia article title
+    search_terms:                     # Terms used for social/news search
+      - "Tesla"
+      - "Tesla Motors"
+      - "Tesla Inc"
+    subreddits:                       # Brand-specific subreddits (in addition to defaults)
+      - "teslamotors"
+      - "TeslaLounge"
+      - "electricvehicles"
+    competitors:                      # Direct competitors for CPS dimension
+      - "Ford"
+      - "GM"
+      - "Rivian"
+      - "BYD"
+    category: "automotive"
+
+  - name: "Apple"
+    ticker: "AAPL"
+    wikipedia_article: "Apple_Inc."
+    search_terms:
+      - "Apple"
+      - "Apple Inc"
+    subreddits:
+      - "apple"
+      - "iphone"
+      - "mac"
+    competitors:
+      - "Samsung"
+      - "Google"
+      - "Microsoft"
+    category: "technology"
+
+  - name: "Nike"
+    ticker: "NKE"
+    wikipedia_article: "Nike,_Inc."
+    search_terms:
+      - "Nike"
+      - "Nike Inc"
+    subreddits:
+      - "Nike"
+      - "Sneakers"
+    competitors:
+      - "Adidas"
+      - "New Balance"
+      - "Puma"
+    category: "apparel"

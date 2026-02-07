@@ -1,0 +1,25 @@
+# Core dependencies
+vaderSentiment>=3.3
+textblob>=0.18
+numpy>=1.24
+pandas>=2.0
+pyyaml>=6.0
+rich>=13.0
+click>=8.1
+requests>=2.31
+python-dateutil>=2.8
+atoma>=0.0.17
+
+# Optional: data collectors (require API keys or network)
+# praw>=7.7              # Reddit (needs REDDIT_CLIENT_ID/SECRET)
+# pytrends>=4.9          # Google Trends (rate-limited)
+# yfinance>=0.2          # Yahoo Finance (may need wheel fixes)
+
+# Optional: deep learning sentiment (GPU recommended)
+# transformers>=4.30
+# torch>=2.0
+
+# Development
+pytest>=7.4
+pytest-cov>=4.1
+pytest-mock>=3.11
