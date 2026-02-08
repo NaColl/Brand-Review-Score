@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BSS — Brand Sentiment Score</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  .grade-pill { padding: 2px 10px; border-radius: 999px; font-weight: 700; font-size: 0.75rem; }
+  .grade-a-plus { background: #dcfce7; color: #166534; }
+  .grade-a { background: #dcfce7; color: #166534; }
+  .grade-b-plus { background: #e0f2fe; color: #0c4a6e; }
+  .grade-b { background: #e0f2fe; color: #0c4a6e; }
+  .grade-c { background: #fef9c3; color: #854d0e; }
+  .grade-d { background: #fed7aa; color: #9a3412; }
+  .grade-f { background: #fecaca; color: #991b1b; }
+  .quadrant-strong_brand { border-left: 4px solid #22c55e; }
+  .quadrant-overhyped { border-left: 4px solid #ef4444; }
+  .quadrant-hidden_gem { border-left: 4px solid #06b6d4; }
+  .quadrant-declining { border-left: 4px solid #f97316; }
+  .dim-bar { height: 8px; border-radius: 4px; transition: width 0.5s ease; }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .glass { background: rgba(255,255,255,0.7); backdrop-filter: blur(10px); }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- Top Nav -->
+<nav class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-50 glass">
+  <div class="flex items-center gap-3">
+    <div class="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
+      <span class="text-white font-bold text-sm">B</span>
+    </div>
+    <h1 class="text-lg font-bold text-gray-900">Brand Sentiment Score</h1>
+    <span class="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">v2</span>
+  </div>
+  <div class="flex items-center gap-4">
+    <span id="alert-badge" class="hidden text-xs bg-red-500 text-white px-2 py-0.5 rounded-full cursor-pointer" onclick="showAlerts()">0 alerts</span>
+    <div class="flex items-center gap-2">
+      <input id="api-key-input" type="password" placeholder="API Key" class="text-sm border rounded-lg px-3 py-1.5 w-56 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+      <button onclick="connect()" class="bg-indigo-600 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-indigo-700 font-medium">Connect</button>
+    </div>
+  </div>
+</nav>
+
+<!-- Main Content -->
+<main id="main" class="max-w-7xl mx-auto px-6 py-8">
+
+  <!-- Onboarding -->
+  <div id="onboarding" class="text-center py-20">
+    <div class="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
+      <span class="text-white font-bold text-2xl">B</span>
+    </div>
+    <h2 class="text-3xl font-bold text-gray-900 mb-3">Brand Sentiment Score</h2>
+    <p class="text-gray-500 max-w-lg mx-auto mb-8">AI-powered brand intelligence. 8-dimension scoring, Hype vs Health Index, Luxury Brand Index, and predictive signals — from free public data.</p>
+    <div class="bg-white rounded-xl shadow-sm border p-6 max-w-md mx-auto text-left">
+      <h3 class="font-semibold text-gray-900 mb-4">Get Started</h3>
+      <div class="space-y-3 text-sm">
+        <p class="text-gray-600">1. Create an API key at <code class="bg-gray-100 px-1.5 py-0.5 rounded">POST /api/v1/keys</code></p>
+        <p class="text-gray-600">2. Paste it above and click <strong>Connect</strong></p>
+        <p class="text-gray-600">3. Register brands and start scoring</p>
+      </div>
+      <div class="mt-4 pt-4 border-t">
+        <button onclick="setupDemo()" class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-2.5 rounded-lg font-semibold hover:opacity-90">
+          Quick Demo (auto-setup)
+        </button>
+        <p class="text-xs text-gray-400 mt-2 text-center">Creates an API key, registers 4 brands, and scores them with demo data</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard (hidden until connected) -->
+  <div id="dashboard" class="hidden space-y-6 fade-in">
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="summary-cards"></div>
+
+    <!-- Brand Cards Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6" id="brand-cards"></div>
+
+    <!-- Alerts Panel -->
+    <div id="alerts-panel" class="hidden bg-white rounded-xl shadow-sm border p-6">
+      <h3 class="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+        Alerts <span id="alert-count" class="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full"></span>
+      </h3>
+      <div id="alerts-list" class="space-y-2"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+let API_KEY = '';
+const BASE = '';
+
+// ── API Helpers ──────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = { method, headers: { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(BASE + path, opts);
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.detail || r.statusText);
+  }
+  return r.json();
+}
+
+// ── Connect ──────────────────────────────────────────────────────────────
+async function connect() {
+  API_KEY = document.getElementById('api-key-input').value.trim();
+  if (!API_KEY) return alert('Enter an API key');
+  try {
+    const data = await api('GET', '/api/v1/dashboard');
+    document.getElementById('onboarding').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+    renderDashboard(data);
+  } catch (e) {
+    alert('Connection failed: ' + e.message);
+  }
+}
+
+// ── Quick Demo Setup ─────────────────────────────────────────────────────
+async function setupDemo() {
+  try {
+    const btn = event.target;
+    btn.textContent = 'Setting up...';
+    btn.disabled = true;
+
+    // Create API key
+    const keyRes = await fetch(BASE + '/api/v1/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Demo Account', tier: 'pro' })
+    });
+    const keyData = await keyRes.json();
+    API_KEY = keyData.api_key;
+    document.getElementById('api-key-input').value = API_KEY;
+
+    // Register demo brands
+    const brands = [
+      { name: 'Nike', ticker: 'NKE', category: 'sportswear', competitors: ['Adidas', 'New Balance'], sale_percentage: 0.25, avg_discount_pct: 0.30, resale_value_ratio: 0.72 },
+      { name: 'Chanel', category: 'luxury', is_luxury: true, competitors: ['Dior', 'Louis Vuitton'], sale_percentage: 0.02, resale_value_ratio: 0.85 },
+      { name: 'Tesla', ticker: 'TSLA', category: 'automotive', competitors: ['Rivian', 'Ford'], resale_value_ratio: 0.68 },
+      { name: 'Gap', ticker: 'GAP', category: 'retail', competitors: ['H&M', 'Zara'], sale_percentage: 0.55, avg_discount_pct: 0.45, resale_value_ratio: 0.15 },
+    ];
+
+    const brandIds = [];
+    for (const b of brands) {
+      btn.textContent = `Registering ${b.name}...`;
+      const res = await api('POST', '/api/v1/brands', b);
+      brandIds.push(res.brand_id);
+    }
+
+    // Score each brand with demo data
+    for (let i = 0; i < brandIds.length; i++) {
+      btn.textContent = `Scoring ${brands[i].name}...`;
+      await api('POST', `/api/v1/brands/${brandIds[i]}/demo-score`);
+    }
+
+    btn.textContent = 'Done!';
+
+    // Load dashboard
+    const data = await api('GET', '/api/v1/dashboard');
+    document.getElementById('onboarding').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+    renderDashboard(data);
+
+  } catch (e) {
+    alert('Demo setup failed: ' + e.message);
+    event.target.textContent = 'Quick Demo (auto-setup)';
+    event.target.disabled = false;
+  }
+}
+
+// ── Render Dashboard ─────────────────────────────────────────────────────
+function renderDashboard(data) {
+  renderSummaryCards(data);
+  renderBrandCards(data.brands);
+  if (data.alerts && data.alerts.length > 0) {
+    renderAlerts(data.alerts);
+    document.getElementById('alert-badge').textContent = data.alert_count + ' alerts';
+    document.getElementById('alert-badge').classList.remove('hidden');
+  }
+}
+
+function gradeClass(grade) {
+  const g = grade.replace('+','_plus').toLowerCase();
+  return 'grade-' + g.replace('_plus', '-plus');
+}
+
+function gradeColor(grade) {
+  if (grade.startsWith('A')) return '#22c55e';
+  if (grade.startsWith('B')) return '#0ea5e9';
+  if (grade === 'C') return '#eab308';
+  if (grade === 'D') return '#f97316';
+  return '#ef4444';
+}
+
+function dimColor(val) {
+  if (val >= 70) return '#22c55e';
+  if (val >= 50) return '#eab308';
+  if (val >= 30) return '#f97316';
+  return '#ef4444';
+}
+
+function renderSummaryCards(data) {
+  const el = document.getElementById('summary-cards');
+  const avgBss = data.brands.length > 0 ? (data.brands.reduce((s, b) => s + (b.bss || 0), 0) / data.brands.filter(b => b.bss).length) : 0;
+  const topBrand = data.brands.reduce((best, b) => (!best || (b.bss||0) > (best.bss||0)) ? b : best, null);
+  const luxuryCount = data.brands.filter(b => b.is_luxury).length;
+
+  el.innerHTML = `
+    <div class="bg-white rounded-xl shadow-sm border p-5">
+      <p class="text-xs text-gray-500 uppercase tracking-wide font-medium">Brands Tracked</p>
+      <p class="text-3xl font-bold text-gray-900 mt-1">${data.total_brands}</p>
+      <p class="text-xs text-gray-400 mt-1">${luxuryCount} luxury</p>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border p-5">
+      <p class="text-xs text-gray-500 uppercase tracking-wide font-medium">Portfolio Avg BSS</p>
+      <p class="text-3xl font-bold mt-1" style="color:${gradeColor(avgBss >= 80 ? 'A' : avgBss >= 60 ? 'B' : avgBss >= 50 ? 'C' : 'D')}">${avgBss.toFixed(1)}</p>
+      <p class="text-xs text-gray-400 mt-1">out of 100</p>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border p-5">
+      <p class="text-xs text-gray-500 uppercase tracking-wide font-medium">Top Brand</p>
+      <p class="text-xl font-bold text-gray-900 mt-1">${topBrand ? topBrand.name : '—'}</p>
+      ${topBrand && topBrand.grade ? `<span class="grade-pill ${gradeClass(topBrand.grade)}">${topBrand.grade}</span>` : ''}
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border p-5">
+      <p class="text-xs text-gray-500 uppercase tracking-wide font-medium">Alerts</p>
+      <p class="text-3xl font-bold ${data.alert_count > 0 ? 'text-red-600' : 'text-green-600'} mt-1">${data.alert_count}</p>
+      <p class="text-xs text-gray-400 mt-1">unread</p>
+    </div>
+  `;
+}
+
+function renderBrandCards(brands) {
+  const el = document.getElementById('brand-cards');
+  el.innerHTML = '';
+
+  for (const brand of brands) {
+    if (!brand.bss) continue;
+
+    const dims = brand.dimensions || {};
+    const dimNames = ['discoverability','identity','value_perception','connection','love','momentum','competitive_position','pricing_intelligence'];
+    const dimLabels = ['Discoverability','Identity','Value Perception','Connection','Love','Momentum','Competitive Position','Pricing Intelligence'];
+
+    let dimsHtml = '';
+    dimNames.forEach((key, i) => {
+      const d = dims[key];
+      if (!d) return;
+      const val = d.value;
+      dimsHtml += `
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-32 text-gray-500 truncate">${dimLabels[i]}</span>
+          <div class="flex-1 bg-gray-100 rounded-full overflow-hidden h-2">
+            <div class="dim-bar" style="width:${val}%; background:${dimColor(val)}"></div>
+          </div>
+          <span class="w-8 text-right font-medium" style="color:${dimColor(val)}">${val.toFixed(0)}</span>
+        </div>`;
+    });
+
+    // HHI
+    let hhiHtml = '';
+    if (brand.hype_health) {
+      const hh = brand.hype_health;
+      const qLabel = { strong_brand: 'Strong Brand', overhyped: 'Overhyped', hidden_gem: 'Hidden Gem', declining: 'Declining' };
+      const qColor = { strong_brand: 'green', overhyped: 'red', hidden_gem: 'cyan', declining: 'orange' };
+      hhiHtml = `
+        <div class="mt-3 pt-3 border-t quadrant-${hh.quadrant} pl-3">
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-gray-500">Hype vs Health</span>
+            <span class="font-semibold" style="color:${qColor[hh.quadrant] || 'gray'}">${qLabel[hh.quadrant] || hh.quadrant}</span>
+          </div>
+          <div class="flex gap-4 mt-1 text-xs">
+            <span>Hype: <strong>${hh.hype_score.toFixed(0)}</strong></span>
+            <span>Health: <strong>${hh.health_score.toFixed(0)}</strong></span>
+          </div>
+        </div>`;
+    }
+
+    // Luxury
+    let luxHtml = '';
+    if (brand.luxury_index) {
+      const lx = brand.luxury_index;
+      luxHtml = `
+        <div class="mt-3 pt-3 border-t">
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-purple-600 font-medium">Luxury Index</span>
+            <span class="font-bold text-purple-700">${lx.luxury_index.toFixed(0)}/100</span>
+          </div>
+          <div class="flex gap-3 mt-1 text-xs text-gray-500">
+            <span>Resale: ${(lx.resale_premium_ratio * 100).toFixed(0)}%</span>
+            <span>Excl: ${lx.exclusivity_score.toFixed(0)}</span>
+            <span>Asp: ${lx.aspirational_score.toFixed(0)}</span>
+          </div>
+        </div>`;
+    }
+
+    // Signal
+    let signalHtml = '';
+    if (brand.signal) {
+      const sig = brand.signal;
+      const sigColors = { strong_bullish: 'green', moderate_bullish: 'green', neutral: 'yellow', moderate_bearish: 'red', strong_bearish: 'red' };
+      const sigLabels = { strong_bullish: 'Strong Bullish', moderate_bullish: 'Mod. Bullish', neutral: 'Neutral', moderate_bearish: 'Mod. Bearish', strong_bearish: 'Strong Bearish' };
+      signalHtml = `
+        <div class="mt-3 pt-3 border-t flex items-center justify-between text-xs">
+          <span class="text-gray-500">Signal</span>
+          <span class="font-semibold" style="color:${sigColors[sig.signal] || 'gray'}">${sigLabels[sig.signal] || sig.signal}</span>
+          ${sig.divergence_signal && sig.divergence_signal !== 'aligned' ? `<span class="ml-2 ${sig.divergence_signal === 'undervalued' ? 'text-green-600' : 'text-red-600'} font-medium">${sig.divergence_signal.toUpperCase()}</span>` : ''}
+        </div>`;
+    }
+
+    // Trend sparkline canvas
+    const canvasId = `trend-${brand.id}`;
+
+    const card = document.createElement('div');
+    card.className = 'bg-white rounded-xl shadow-sm border p-6 fade-in';
+    card.innerHTML = `
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <div class="flex items-center gap-2">
+            <h3 class="text-lg font-bold text-gray-900">${brand.name}</h3>
+            ${brand.is_luxury ? '<span class="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">LUXURY</span>' : ''}
+          </div>
+          <p class="text-xs text-gray-400 mt-0.5">${brand.category} · ${brand.last_scored ? 'Scored ' + new Date(brand.last_scored).toLocaleDateString() : 'Not scored'}</p>
+        </div>
+        <div class="text-right">
+          <div class="text-3xl font-bold" style="color:${gradeColor(brand.grade)}">${brand.bss.toFixed(1)}</div>
+          <span class="grade-pill ${gradeClass(brand.grade)}">${brand.grade}</span>
+        </div>
+      </div>
+      <div class="space-y-1.5">${dimsHtml}</div>
+      ${hhiHtml}${luxHtml}${signalHtml}
+      ${brand.trend && brand.trend.length > 1 ? `<div class="mt-3 pt-3 border-t"><canvas id="${canvasId}" height="60"></canvas></div>` : ''}
+      <div class="mt-4 pt-3 border-t flex gap-2">
+        <button onclick="rescore(${brand.id})" class="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-100 font-medium">Re-score</button>
+        <button onclick="rescore(${brand.id}, true)" class="text-xs bg-gray-50 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-100 font-medium">Demo Score</button>
+      </div>
+    `;
+    el.appendChild(card);
+
+    // Draw sparkline
+    if (brand.trend && brand.trend.length > 1) {
+      setTimeout(() => {
+        const ctx = document.getElementById(canvasId);
+        if (!ctx) return;
+        new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: brand.trend.map(t => t.date),
+            datasets: [{
+              data: brand.trend.map(t => t.bss),
+              borderColor: gradeColor(brand.grade),
+              borderWidth: 2,
+              fill: true,
+              backgroundColor: gradeColor(brand.grade) + '20',
+              tension: 0.4,
+              pointRadius: 0,
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } },
+          }
+        });
+      }, 100);
+    }
+  }
+}
+
+function renderAlerts(alerts) {
+  const panel = document.getElementById('alerts-panel');
+  const list = document.getElementById('alerts-list');
+  const count = document.getElementById('alert-count');
+  panel.classList.remove('hidden');
+  count.textContent = alerts.length;
+
+  list.innerHTML = alerts.map(a => {
+    const colors = { critical: 'bg-red-50 border-red-200 text-red-800', warning: 'bg-yellow-50 border-yellow-200 text-yellow-800', info: 'bg-blue-50 border-blue-200 text-blue-800' };
+    return `<div class="text-sm p-3 rounded-lg border ${colors[a.severity] || colors.info}">
+      <strong>${a.brand_name}</strong>: ${a.message}
+      <span class="text-xs opacity-60 ml-2">${new Date(a.created_at).toLocaleString()}</span>
+    </div>`;
+  }).join('');
+}
+
+function showAlerts() {
+  document.getElementById('alerts-panel').classList.toggle('hidden');
+}
+
+// ── Actions ──────────────────────────────────────────────────────────────
+async function rescore(brandId, demo = false) {
+  try {
+    const path = demo ? `/api/v1/brands/${brandId}/demo-score` : `/api/v1/brands/${brandId}/score`;
+    await api('POST', path);
+    const data = await api('GET', '/api/v1/dashboard');
+    renderDashboard(data);
+  } catch (e) {
+    alert('Scoring failed: ' + e.message);
+  }
+}
+</script>
+</body>
+</html>

@@ -1,8 +1,66 @@
-# Brand Sentiment Score (BSS) v2
+# Brand Sentiment Score (BSS) — SaaS Platform
 
-**A multi-dimensional scoring engine that predicts brand popularity and stock price movements from free public data sources.**
+**AI-powered brand intelligence SaaS. Track brand sentiment, predict stock movements, and benchmark competitors — from free public data.**
 
-Built on the **"Sentiment Iceberg" v2 model** — a unified 8-dimension framework with a separate Hype vs Health Index and Luxury Brand Index. Designed to disrupt traditional brand intelligence with AI-powered, freely available data.
+Production-ready REST API + web dashboard + automated scoring. Deployable via Docker in one command.
+
+## Deploy in 60 Seconds
+
+```bash
+# Docker (production)
+docker compose up -d
+# Open http://localhost:8000
+
+# Local development
+pip install -r requirements.txt
+uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Then visit `http://localhost:8000` and click **Quick Demo** to auto-setup 4 brands with scores.
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/keys` | Create API key (no auth needed) |
+| `POST` | `/api/v1/brands` | Register a brand to track |
+| `GET` | `/api/v1/brands` | List all tracked brands |
+| `POST` | `/api/v1/brands/{id}/score` | Score a brand (live data) |
+| `POST` | `/api/v1/brands/{id}/demo-score` | Score with demo data (offline) |
+| `GET` | `/api/v1/brands/{id}/scores` | Historical score timeline |
+| `GET` | `/api/v1/brands/{id}/latest` | Latest score |
+| `GET` | `/api/v1/compare?brand_ids=1,2,3` | Compare brands side-by-side |
+| `GET` | `/api/v1/alerts` | Score change alerts |
+| `GET` | `/api/v1/dashboard` | Aggregated dashboard data |
+| `GET` | `/health` | Health check |
+| `GET` | `/docs` | Interactive API docs (Swagger) |
+
+### Authentication
+
+Every request (except `/api/v1/keys`, `/health`, `/docs`) requires an `X-API-Key` header.
+
+```bash
+# Create a key
+curl -X POST http://localhost:8000/api/v1/keys \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My Company", "tier": "pro"}'
+
+# Use it
+curl http://localhost:8000/api/v1/brands \
+  -H "X-API-Key: bss_..."
+```
+
+### Tiers
+
+| Tier | Rate Limit | Brands | Price |
+|------|-----------|--------|-------|
+| Starter | 100 req/day | 10 | Free |
+| Pro | 1,000 req/day | 50 | $499/mo |
+| Enterprise | 10,000 req/day | 500 | $2,499/mo |
+
+## The Scoring Engine
+
+Built on the **"Sentiment Iceberg" v2 model** — a unified 8-dimension framework with a separate Hype vs Health Index and Luxury Brand Index.
 
 ## The Scoring Framework (v2 — Unified 8 Dimensions)
 
@@ -195,29 +253,39 @@ export REDDIT_CLIENT_SECRET="your_client_secret"
 ## Architecture
 
 ```
-src/
-├── models/          # Data models (Brand, Review, Score, HHI, LBI, Signal)
-├── collectors/      # Data source integrations (6 free sources + resale)
-│   ├── google_news.py       # Google News RSS via atoma
-│   ├── reddit_collector.py  # Reddit via PRAW
-│   ├── google_trends.py     # Google Trends via pytrends
-│   ├── wikipedia.py         # Wikipedia pageviews API
-│   ├── financial.py         # Yahoo Finance via yfinance
-│   └── resale.py            # TheRealReal, Vestiaire, StockX, Grailed
-├── analysis/        # NLP sentiment pipeline (VADER/TextBlob/FinBERT)
-├── scoring/         # 8 scoring dimensions + composite calculator
-│   ├── discoverability.py        # Dim 1
-│   ├── identity.py               # Dim 2
-│   ├── value_perception.py       # Dim 3
-│   ├── connection.py             # Dim 4
-│   ├── love.py                   # Dim 5
-│   ├── momentum.py               # Dim 6
-│   ├── competitive.py            # Dim 7
-│   ├── pricing_intelligence.py   # Dim 8
-│   ├── hype_health.py            # HHI (separate metric)
-│   └── composite.py              # Orchestrator
-├── prediction/      # Trend detection + signal generation
-└── reporting/       # Console output (Rich) + JSON/CSV export
+├── server.py              # FastAPI REST API (production entry point)
+├── cli.py                 # CLI tool (score, compare, demo, export)
+├── Dockerfile             # Production container
+├── docker-compose.yml     # One-command deployment
+├── dashboard/
+│   └── index.html         # Web dashboard (Tailwind + Chart.js SPA)
+└── src/
+    ├── database.py        # SQLite persistence (brands, scores, alerts, API keys)
+    ├── auth.py            # API key authentication middleware
+    ├── scheduler.py       # APScheduler for automated scoring
+    ├── demo.py            # Realistic demo data (Nike, Chanel, Tesla, Gap)
+    ├── models/            # Data models (Brand, Review, Score, HHI, LBI, Signal)
+    ├── collectors/        # Data source integrations
+    │   ├── google_news.py       # Google News RSS via atoma
+    │   ├── reddit_collector.py  # Reddit via PRAW
+    │   ├── google_trends.py     # Google Trends via pytrends
+    │   ├── wikipedia.py         # Wikipedia pageviews API
+    │   ├── financial.py         # Yahoo Finance via yfinance
+    │   └── resale.py            # TheRealReal, Vestiaire, StockX, Grailed
+    ├── analysis/          # NLP sentiment pipeline (VADER/TextBlob/FinBERT)
+    ├── scoring/           # 8 scoring dimensions + composite calculator
+    │   ├── discoverability.py        # Dim 1
+    │   ├── identity.py               # Dim 2
+    │   ├── value_perception.py       # Dim 3
+    │   ├── connection.py             # Dim 4
+    │   ├── love.py                   # Dim 5
+    │   ├── momentum.py               # Dim 6
+    │   ├── competitive.py            # Dim 7
+    │   ├── pricing_intelligence.py   # Dim 8
+    │   ├── hype_health.py            # HHI (separate metric)
+    │   └── composite.py              # Orchestrator
+    ├── prediction/        # Trend detection + signal generation
+    └── reporting/         # Console output (Rich) + JSON/CSV export
 ```
 
 ## NLP Engines

@@ -39,3 +39,6 @@ reports/
 # Model caches (ML model weights, not src/models/)
 .cache/
 /models/
+
+# Runtime data (SQLite database)
+data/

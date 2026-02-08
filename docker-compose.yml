@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  bss-api:
+    build: .
+    container_name: bss-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - bss-data:/app/data
+    environment:
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID:-}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET:-}
+    restart: unless-stopped
+
+volumes:
+  bss-data:
