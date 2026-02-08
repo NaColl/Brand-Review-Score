@@ -6,6 +6,11 @@ Usage:
     python cli.py compare --brands "Tesla,Ford,GM"
     python cli.py score --brand "Gucci" --luxury
     python cli.py export --brand "Nike" --format json --output report.json
+
+Demo mode (uses realistic built-in data, no network required):
+    python cli.py demo --brand Nike
+    python cli.py demo --brand Chanel
+    python cli.py demo --all
 """
 
 from __future__ import annotations
@@ -59,6 +64,99 @@ def main(verbose: bool) -> None:
     _setup_logging(verbose)
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Demo command — works offline with realistic built-in data
+# ─────────────────────────────────────────────────────────────────────────
+
+@main.command()
+@click.option("--brand", "-b", type=str, default=None, help="Demo brand: Nike, Chanel, Tesla, Gap")
+@click.option("--all", "run_all", is_flag=True, default=False, help="Score all 4 demo brands.")
+@click.option("--engine", "-e", type=click.Choice(["vader", "textblob", "ensemble"]), default="vader")
+@click.option("--output", "-o", type=str, default=None, help="Output file path (JSON).")
+def demo(brand: str | None, run_all: bool, engine: str, output: str | None) -> None:
+    """Run BSS scoring with built-in demo data (no network required)."""
+    from src.demo import generate_demo_data, generate_demo_competitors, get_demo_brand, list_demo_brands
+
+    if not brand and not run_all:
+        available = list_demo_brands()
+        click.echo(f"Available demo brands: {', '.join(available)}")
+        click.echo("Usage: python cli.py demo --brand Nike")
+        click.echo("       python cli.py demo --all")
+        return
+
+    brand_names = list_demo_brands() if run_all else [brand]
+    reporter = ConsoleReporter()
+    signal_gen = SignalGenerator()
+    exporter = ExportReporter()
+    results = []
+
+    # Demo sale/pricing data per brand
+    demo_pricing = {
+        "Nike": {"sale_pct": 0.25, "discount_pct": 0.30, "resale_ratio": 0.72},
+        "Chanel": {"sale_pct": 0.02, "discount_pct": 0.0, "resale_ratio": 0.85},
+        "Tesla": {"sale_pct": None, "discount_pct": None, "resale_ratio": 0.68},
+        "Gap": {"sale_pct": 0.55, "discount_pct": 0.45, "resale_ratio": 0.15},
+    }
+
+    # Demo stock price changes for signal generation
+    demo_price_changes = {
+        "Nike": 5.2,
+        "Chanel": None,
+        "Tesla": -3.8,
+        "Gap": -12.4,
+    }
+
+    for name in brand_names:
+        try:
+            brand_obj = get_demo_brand(name)
+        except ValueError as e:
+            click.echo(f"Error: {e}", err=True)
+            continue
+
+        demo_data = generate_demo_data(name)
+        demo_competitors = generate_demo_competitors(name)
+        pricing = demo_pricing.get(name, {})
+
+        calculator = BSSCalculator(sentiment_engine=engine)
+        bss = calculator.calculate(
+            brand_obj,
+            sale_percentage=pricing.get("sale_pct"),
+            avg_discount_pct=pricing.get("discount_pct"),
+            resale_value_ratio=pricing.get("resale_ratio"),
+            demo_data=demo_data,
+            demo_competitors=demo_competitors,
+        )
+
+        price_change = demo_price_changes.get(name)
+        signal = signal_gen.generate(bss, price_change_pct=price_change)
+
+        reporter.report(bss, signal)
+        results.append(bss)
+
+        if output and not run_all:
+            exporter.to_json(bss, signal, output_path=output)
+            click.echo(f"\nJSON report saved to: {output}")
+
+    # Comparison summary for --all
+    if run_all and len(results) > 1:
+        click.echo("\n" + "=" * 60)
+        click.echo("  DEMO COMPARISON — 4 Brand Archetypes")
+        click.echo("=" * 60)
+        sorted_results = sorted(results, key=lambda r: r.bss, reverse=True)
+        for i, r in enumerate(sorted_results, 1):
+            lux = " [LUXURY]" if r.is_luxury else ""
+            click.echo(f"  {i}. {r.brand_name:12s}  {r.bss:5.1f}/100  ({r.grade():>2s}){lux}")
+        click.echo()
+
+        if output:
+            exporter.to_csv(results, output)
+            click.echo(f"CSV comparison saved to: {output}")
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Live scoring commands (require network)
+# ─────────────────────────────────────────────────────────────────────────
+
 @main.command()
 @click.option("--brand", "-b", type=str, help="Brand name to score.")
 @click.option("--ticker", "-t", type=str, default=None, help="Stock ticker symbol.")
@@ -82,7 +180,7 @@ def score(
     resale_ratio: float | None,
     output: str | None,
 ) -> None:
-    """Calculate the Brand Sentiment Score for one or more brands."""
+    """Calculate the Brand Sentiment Score for one or more brands (live data)."""
     brands: list[Brand] = []
 
     if config:
@@ -127,7 +225,7 @@ def score(
 @click.option("--luxury", is_flag=True, default=False, help="Force luxury brand scoring profile.")
 @click.option("--output", "-o", type=str, default=None, help="Output CSV path.")
 def compare(brands: str, engine: str, luxury: bool, output: str | None) -> None:
-    """Compare BSS scores across multiple brands."""
+    """Compare BSS scores across multiple brands (live data)."""
     brand_names = [b.strip() for b in brands.split(",")]
     brand_objects = [_make_brand(name) for name in brand_names]
 

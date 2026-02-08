@@ -78,6 +78,8 @@ class BSSCalculator:
         sale_percentage: float | None = None,
         avg_discount_pct: float | None = None,
         resale_value_ratio: float | None = None,
+        demo_data: dict[str, ReviewCollection] | None = None,
+        demo_competitors: dict[str, ReviewCollection] | None = None,
     ) -> BrandSentimentScore:
         """Calculate the complete BSS for a brand.
 
@@ -87,6 +89,8 @@ class BSSCalculator:
             sale_percentage: % of products on sale (0.0-1.0).
             avg_discount_pct: Average discount % (0.0-1.0).
             resale_value_ratio: Resale/retail price ratio.
+            demo_data: Pre-built source collections (skips live collection).
+            demo_competitors: Pre-built competitor collections.
         """
         logger.info("Calculating BSS v2 for '%s'...", brand.name)
 
@@ -100,24 +104,36 @@ class BSSCalculator:
         source_collections: dict[str, ReviewCollection] = {}
         sources_used: list[str] = []
 
-        for collector in self.collectors:
-            collection = collector.collect(brand)
-            if collection.count > 0:
-                all_reviews.reviews.extend(collection.reviews)
-                source_collections[collector.name] = collection
-                sources_used.append(collector.name)
-                logger.info("  %s: %d items", collector.name, collection.count)
+        if demo_data:
+            # Use pre-built demo data — skip live collection
+            for source_name, collection in demo_data.items():
+                if collection.count > 0:
+                    all_reviews.reviews.extend(collection.reviews)
+                    source_collections[source_name] = collection
+                    sources_used.append(source_name)
+                    logger.info("  %s: %d items (demo)", source_name, collection.count)
+        else:
+            for collector in self.collectors:
+                collection = collector.collect(brand)
+                if collection.count > 0:
+                    all_reviews.reviews.extend(collection.reviews)
+                    source_collections[collector.name] = collection
+                    sources_used.append(collector.name)
+                    logger.info("  %s: %d items", collector.name, collection.count)
 
-        # Resale data collection (especially for luxury)
-        resale_data = self.resale_collector.collect(brand)
-        if resale_data.count > 0:
-            all_reviews.reviews.extend(resale_data.reviews)
-            source_collections["resale"] = resale_data
-            sources_used.append("resale")
+            # Resale data collection (especially for luxury)
+            resale_data = self.resale_collector.collect(brand)
+            if resale_data.count > 0:
+                all_reviews.reviews.extend(resale_data.reviews)
+                source_collections["resale"] = resale_data
+                sources_used.append("resale")
 
         # Estimate resale ratio if not provided
         if resale_value_ratio is None and is_luxury:
-            resale_value_ratio = self.resale_collector.estimate_resale_ratio(brand)
+            if demo_data:
+                resale_value_ratio = 0.85  # Reasonable luxury default for demo
+            else:
+                resale_value_ratio = self.resale_collector.estimate_resale_ratio(brand)
 
         # ----------------------------------------------------------
         # Phase 2: Run sentiment analysis
@@ -150,7 +166,9 @@ class BSSCalculator:
 
         # Competitive Position
         competitor_collections: dict[str, ReviewCollection] = {}
-        if competitor_brands:
+        if demo_competitors:
+            competitor_collections = demo_competitors
+        elif competitor_brands:
             for comp_brand in competitor_brands:
                 comp_reviews = ReviewCollection(brand_name=comp_brand.name)
                 for collector in self.collectors:
@@ -192,12 +210,17 @@ class BSSCalculator:
         # ----------------------------------------------------------
         # Phase 5: Hype vs Health Index
         # ----------------------------------------------------------
-        financial_collector = next(
-            (c for c in self.collectors if isinstance(c, FinancialCollector)), None
-        )
         stock_momentum = None
-        if financial_collector and brand.ticker:
-            stock_momentum = financial_collector.get_price_change(brand, days=30)
+        if demo_data and brand.ticker:
+            # Use realistic demo stock momentum
+            demo_stock = {"Nike": 5.2, "Chanel": None, "Tesla": -3.8, "Gap": -12.4}
+            stock_momentum = demo_stock.get(brand.name)
+        else:
+            financial_collector = next(
+                (c for c in self.collectors if isinstance(c, FinancialCollector)), None
+            )
+            if financial_collector and brand.ticker:
+                stock_momentum = financial_collector.get_price_change(brand, days=30)
 
         hhi = calculate_hype_health(
             trends_collection=trends_data,
