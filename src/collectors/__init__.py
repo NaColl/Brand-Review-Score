@@ -4,6 +4,7 @@ from src.collectors.reddit_collector import RedditCollector
 from src.collectors.google_trends import GoogleTrendsCollector
 from src.collectors.wikipedia import WikipediaCollector
 from src.collectors.financial import FinancialCollector
+from src.collectors.resale import ResaleCollector
 
 __all__ = [
     "BaseCollector",
@@ -12,4 +13,5 @@ __all__ = [
     "GoogleTrendsCollector",
     "WikipediaCollector",
     "FinancialCollector",
+    "ResaleCollector",
 ]

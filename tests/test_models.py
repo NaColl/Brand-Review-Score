@@ -11,7 +11,7 @@ from src.models.score import (
     BrandSentimentScore,
     DimensionScore,
     PredictiveSignal,
-    ReviewQualityScore,
+    ValuePerceptionScore,
 )
 
 
@@ -141,7 +141,7 @@ class TestBrandSentimentScore:
         bss = BrandSentimentScore(
             brand_name="Test",
             bss=72.5,
-            review_quality=ReviewQualityScore(value=80.0),
+            value_perception=ValuePerceptionScore(value=80.0),
             data_sources_used=["google_news", "reddit"],
             total_data_points=150,
             confidence=0.85,
@@ -150,7 +150,7 @@ class TestBrandSentimentScore:
         assert d["brand"] == "Test"
         assert d["bss"] == 72.5
         assert d["grade"] == "B+"
-        assert "review_quality" in d["dimensions"]
+        assert "value_perception" in d["dimensions"]
         assert d["confidence"] == 0.85
 
 

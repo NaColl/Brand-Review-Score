@@ -1,4 +1,4 @@
-"""Export BSS results to JSON and CSV."""
+"""Export BSS v2 results to JSON and CSV."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 import logging
 from pathlib import Path
 
-from src.models.score import BrandSentimentScore, PredictiveSignal
+from src.models.score import ALL_DIMENSION_ATTRS, BrandSentimentScore, PredictiveSignal
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +49,10 @@ class ExportReporter:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         fieldnames = [
-            "brand", "timestamp", "bss", "grade", "confidence",
-            "review_quality", "social_sentiment", "momentum",
-            "brand_health", "competitive_position",
+            "brand", "timestamp", "bss", "grade", "is_luxury", "confidence",
+        ] + ALL_DIMENSION_ATTRS + [
+            "hhi_hype", "hhi_health", "hhi_quadrant",
+            "luxury_index",
             "data_sources", "total_data_points",
         ]
 
@@ -60,19 +61,37 @@ class ExportReporter:
             writer.writeheader()
 
             for bss in results:
-                writer.writerow({
+                row = {
                     "brand": bss.brand_name,
                     "timestamp": bss.timestamp.isoformat(),
                     "bss": round(bss.bss, 2),
                     "grade": bss.grade(),
+                    "is_luxury": bss.is_luxury,
                     "confidence": round(bss.confidence, 2),
-                    "review_quality": round(bss.review_quality.value, 2) if bss.review_quality else "",
-                    "social_sentiment": round(bss.social_sentiment.value, 2) if bss.social_sentiment else "",
-                    "momentum": round(bss.momentum.value, 2) if bss.momentum else "",
-                    "brand_health": round(bss.brand_health.value, 2) if bss.brand_health else "",
-                    "competitive_position": round(bss.competitive_position.value, 2) if bss.competitive_position else "",
                     "data_sources": ",".join(bss.data_sources_used),
                     "total_data_points": bss.total_data_points,
-                })
+                }
+
+                # 8 dimensions
+                for dim_attr in ALL_DIMENSION_ATTRS:
+                    dim = getattr(bss, dim_attr)
+                    row[dim_attr] = round(dim.value, 2) if dim else ""
+
+                # HHI
+                if bss.hype_health:
+                    row["hhi_hype"] = round(bss.hype_health.hype_score, 2)
+                    row["hhi_health"] = round(bss.hype_health.health_score, 2)
+                    row["hhi_quadrant"] = bss.hype_health.quadrant
+                else:
+                    row["hhi_hype"] = ""
+                    row["hhi_health"] = ""
+                    row["hhi_quadrant"] = ""
+
+                # Luxury index
+                row["luxury_index"] = (
+                    round(bss.luxury_index.composite, 2) if bss.luxury_index else ""
+                )
+
+                writer.writerow(row)
 
         logger.info("CSV report written to %s (%d brands)", path, len(results))

@@ -1,18 +1,12 @@
-"""Composite Brand Sentiment Score (BSS) calculator.
+"""Composite Brand Sentiment Score (BSS) v2 calculator.
 
-Combines all five dimensions into the final score using the
-"Sentiment Iceberg" model weighted by predictive power.
+Combines 8 unified dimensions + Hype vs Health Index + Luxury Brand Index.
 
-    BSS = 0.25×RQS + 0.20×SSS + 0.25×MS + 0.15×BHI + 0.15×CPS
+    BSS = Σ(weight_i × dimension_i) for i in 1..8
 
-The BSS is a 0–100 score where:
-    90–100  A+   Exceptional brand sentiment
-    80–89   A    Strong positive sentiment
-    70–79   B+   Above average
-    60–69   B    Average / healthy
-    50–59   C    Below average — watch for decline
-    40–49   D    Weak — likely declining popularity
-    0–39    F    Critical — active brand damage
+Supports two weighting profiles:
+- DEFAULT: General brand scoring
+- LUXURY: Luxury brand scoring (auto-detected or manual)
 """
 
 from __future__ import annotations
@@ -20,7 +14,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from config.settings import DIMENSION_WEIGHTS
+from config.settings import (
+    DIMENSION_WEIGHTS,
+    LUXURY_DIMENSION_WEIGHTS,
+    LUXURY_BRANDS,
+    LUXURY_ASPIRATIONAL_PHRASES,
+    LUXURY_DEVALUATION_PHRASES,
+)
 from src.analysis.sentiment import SentimentAnalyzer
 from src.collectors.base import BaseCollector
 from src.collectors.google_news import GoogleNewsCollector
@@ -28,14 +28,22 @@ from src.collectors.google_trends import GoogleTrendsCollector
 from src.collectors.reddit_collector import RedditCollector
 from src.collectors.wikipedia import WikipediaCollector
 from src.collectors.financial import FinancialCollector
+from src.collectors.resale import ResaleCollector
 from src.models.brand import Brand
 from src.models.review import ReviewCollection
-from src.models.score import BrandSentimentScore
-from src.scoring.brand_health import calculate_brand_health
-from src.scoring.competitive import calculate_competitive_position
+from src.models.score import (
+    BrandSentimentScore,
+    LuxuryBrandIndex,
+)
+from src.scoring.discoverability import calculate_discoverability
+from src.scoring.identity import calculate_identity
+from src.scoring.value_perception import calculate_value_perception
+from src.scoring.connection import calculate_connection
+from src.scoring.love import calculate_love
 from src.scoring.momentum import calculate_momentum
-from src.scoring.review_quality import calculate_review_quality
-from src.scoring.social_sentiment import calculate_social_sentiment
+from src.scoring.competitive import calculate_competitive_position
+from src.scoring.pricing_intelligence import calculate_pricing_intelligence
+from src.scoring.hype_health import calculate_hype_health
 
 logger = logging.getLogger(__name__)
 
@@ -43,15 +51,14 @@ logger = logging.getLogger(__name__)
 class BSSCalculator:
     """Orchestrates data collection, sentiment analysis, and scoring.
 
-    This is the main entry point for computing a Brand Sentiment Score.
-    It coordinates all collectors, runs NLP analysis, and combines
-    the five dimensions into the final composite score.
+    v2: 8 dimensions + HHI + Luxury Brand Index.
     """
 
     def __init__(
         self,
         sentiment_engine: str = "vader",
         collectors: list[BaseCollector] | None = None,
+        force_luxury: bool | None = None,
     ) -> None:
         self.analyzer = SentimentAnalyzer(engine=sentiment_engine)
         self.collectors = collectors or [
@@ -61,23 +68,30 @@ class BSSCalculator:
             WikipediaCollector(),
             FinancialCollector(),
         ]
+        self.resale_collector = ResaleCollector()
+        self.force_luxury = force_luxury
 
     def calculate(
         self,
         brand: Brand,
         competitor_brands: list[Brand] | None = None,
+        sale_percentage: float | None = None,
+        avg_discount_pct: float | None = None,
+        resale_value_ratio: float | None = None,
     ) -> BrandSentimentScore:
         """Calculate the complete BSS for a brand.
 
         Args:
             brand: The brand to score.
-            competitor_brands: Optional list of competitor Brand objects
-                               for the competitive position dimension.
-
-        Returns:
-            A fully populated BrandSentimentScore.
+            competitor_brands: Competitor Brand objects for CPS dimension.
+            sale_percentage: % of products on sale (0.0-1.0).
+            avg_discount_pct: Average discount % (0.0-1.0).
+            resale_value_ratio: Resale/retail price ratio.
         """
-        logger.info("Calculating BSS for '%s'...", brand.name)
+        logger.info("Calculating BSS v2 for '%s'...", brand.name)
+
+        # Detect luxury
+        is_luxury = self._detect_luxury(brand)
 
         # ----------------------------------------------------------
         # Phase 1: Collect data from all sources
@@ -92,18 +106,27 @@ class BSSCalculator:
                 all_reviews.reviews.extend(collection.reviews)
                 source_collections[collector.name] = collection
                 sources_used.append(collector.name)
-                logger.info(
-                    "  %s: %d items collected", collector.name, collection.count
-                )
+                logger.info("  %s: %d items", collector.name, collection.count)
+
+        # Resale data collection (especially for luxury)
+        resale_data = self.resale_collector.collect(brand)
+        if resale_data.count > 0:
+            all_reviews.reviews.extend(resale_data.reviews)
+            source_collections["resale"] = resale_data
+            sources_used.append("resale")
+
+        # Estimate resale ratio if not provided
+        if resale_value_ratio is None and is_luxury:
+            resale_value_ratio = self.resale_collector.estimate_resale_ratio(brand)
 
         # ----------------------------------------------------------
-        # Phase 2: Run sentiment analysis on all collected text
+        # Phase 2: Run sentiment analysis
         # ----------------------------------------------------------
         self.analyzer.analyze_collection(all_reviews)
 
-        # Re-sync sentiment scores into source-specific collections
+        # Sync sentiment into source collections
         review_map = {id(r): r for r in all_reviews.reviews}
-        for name, coll in source_collections.items():
+        for coll in source_collections.values():
             for r in coll.reviews:
                 analyzed = review_map.get(id(r))
                 if analyzed:
@@ -111,25 +134,21 @@ class BSSCalculator:
                     r.sentiment_label = analyzed.sentiment_label
 
         # ----------------------------------------------------------
-        # Phase 3: Calculate each dimension
+        # Phase 3: Calculate all 8 dimensions
         # ----------------------------------------------------------
-
-        # Dim 1: Review Quality (uses all reviews with ratings)
-        rqs = calculate_review_quality(all_reviews)
-
-        # Dim 2: Social Sentiment (split by source type)
         reddit_data = source_collections.get("reddit", ReviewCollection(brand_name=brand.name))
         news_data = source_collections.get("google_news", ReviewCollection(brand_name=brand.name))
         trends_data = source_collections.get("google_trends", ReviewCollection(brand_name=brand.name))
-        sss = calculate_social_sentiment(reddit_data, news_data, trends_data)
+        wiki_data = source_collections.get("wikipedia", ReviewCollection(brand_name=brand.name))
 
-        # Dim 3: Momentum (uses all time-stamped data)
-        ms = calculate_momentum(all_reviews)
+        disc = calculate_discoverability(news_data, reddit_data, trends_data, wiki_data)
+        ident = calculate_identity(all_reviews, news_data)
+        val = calculate_value_perception(all_reviews, resale_premium_ratio=resale_value_ratio)
+        conn = calculate_connection(all_reviews)
+        love = calculate_love(all_reviews)
+        mom = calculate_momentum(all_reviews)
 
-        # Dim 4: Brand Health (uses text-heavy reviews)
-        bhi = calculate_brand_health(all_reviews)
-
-        # Dim 5: Competitive Position
+        # Competitive Position
         competitor_collections: dict[str, ReviewCollection] = {}
         if competitor_brands:
             for comp_brand in competitor_brands:
@@ -142,19 +161,63 @@ class BSSCalculator:
                 competitor_collections[comp_brand.name] = comp_reviews
         cps = calculate_competitive_position(all_reviews, competitor_collections)
 
-        # ----------------------------------------------------------
-        # Phase 4: Compute composite BSS
-        # ----------------------------------------------------------
-        bss_value = (
-            DIMENSION_WEIGHTS["review_quality"] * rqs.value
-            + DIMENSION_WEIGHTS["social_sentiment"] * sss.value
-            + DIMENSION_WEIGHTS["momentum"] * ms.value
-            + DIMENSION_WEIGHTS["brand_health"] * bhi.value
-            + DIMENSION_WEIGHTS["competitive_position"] * cps.value
+        pricing = calculate_pricing_intelligence(
+            all_reviews,
+            sale_percentage=sale_percentage,
+            avg_discount_pct=avg_discount_pct,
+            resale_value_ratio=resale_value_ratio,
         )
 
         # ----------------------------------------------------------
-        # Phase 5: Compute confidence
+        # Phase 4: Compute composite BSS
+        # ----------------------------------------------------------
+        weights = LUXURY_DIMENSION_WEIGHTS if is_luxury else DIMENSION_WEIGHTS
+
+        dimension_map = {
+            "discoverability": disc,
+            "identity": ident,
+            "value_perception": val,
+            "connection": conn,
+            "love": love,
+            "momentum": mom,
+            "competitive_position": cps,
+            "pricing_intelligence": pricing,
+        }
+
+        bss_value = sum(
+            weights[dim_name] * dim_score.value
+            for dim_name, dim_score in dimension_map.items()
+        )
+
+        # ----------------------------------------------------------
+        # Phase 5: Hype vs Health Index
+        # ----------------------------------------------------------
+        financial_collector = next(
+            (c for c in self.collectors if isinstance(c, FinancialCollector)), None
+        )
+        stock_momentum = None
+        if financial_collector and brand.ticker:
+            stock_momentum = financial_collector.get_price_change(brand, days=30)
+
+        hhi = calculate_hype_health(
+            trends_collection=trends_data,
+            reddit_collection=reddit_data,
+            news_collection=news_data,
+            wiki_collection=wiki_data,
+            stock_momentum=stock_momentum,
+            sale_percentage=sale_percentage,
+            resale_premium_ratio=resale_value_ratio,
+        )
+
+        # ----------------------------------------------------------
+        # Phase 6: Luxury Brand Index
+        # ----------------------------------------------------------
+        luxury_index = None
+        if is_luxury:
+            luxury_index = self._calculate_luxury_index(brand, all_reviews, resale_value_ratio)
+
+        # ----------------------------------------------------------
+        # Phase 7: Confidence
         # ----------------------------------------------------------
         confidence = _compute_confidence(all_reviews, source_collections)
 
@@ -162,47 +225,95 @@ class BSSCalculator:
             brand_name=brand.name,
             timestamp=datetime.utcnow(),
             bss=bss_value,
-            review_quality=rqs,
-            social_sentiment=sss,
-            momentum=ms,
-            brand_health=bhi,
+            discoverability=disc,
+            identity=ident,
+            value_perception=val,
+            connection=conn,
+            love=love,
+            momentum=mom,
             competitive_position=cps,
+            pricing_intelligence=pricing,
+            hype_health=hhi,
+            luxury_index=luxury_index,
+            is_luxury=is_luxury,
             data_sources_used=sources_used,
             total_data_points=all_reviews.count,
             confidence=confidence,
         )
 
         logger.info(
-            "BSS for '%s': %.1f (%s) — confidence: %.0f%%",
-            brand.name, result.bss, result.grade(), confidence * 100,
+            "BSS for '%s': %.1f (%s) — %s — confidence: %.0f%%",
+            brand.name, result.bss, result.grade(),
+            "LUXURY" if is_luxury else "standard",
+            confidence * 100,
         )
 
         return result
+
+    def _detect_luxury(self, brand: Brand) -> bool:
+        if self.force_luxury is not None:
+            return self.force_luxury
+        return brand.name.lower() in LUXURY_BRANDS
+
+    def _calculate_luxury_index(
+        self,
+        brand: Brand,
+        collection: ReviewCollection,
+        resale_ratio: float | None,
+    ) -> LuxuryBrandIndex:
+        exclusivity_count = 0
+        aspirational_count = 0
+        devaluation_count = 0
+
+        for review in collection.reviews:
+            lower = review.text.lower()
+            if any(p in lower for p in LUXURY_ASPIRATIONAL_PHRASES):
+                aspirational_count += 1
+            if any(p in lower for p in LUXURY_DEVALUATION_PHRASES):
+                devaluation_count += 1
+            if any(kw in lower for kw in ["limited edition", "exclusive", "rare", "collectible", "waiting list"]):
+                exclusivity_count += 1
+
+        total = max(1, len(collection.reviews))
+
+        exclusivity_score = min(100, (exclusivity_count / total) * 1000)
+        asp_net = (aspirational_count - devaluation_count) / total
+        aspirational_score = max(0, min(100, 50 + asp_net * 500))
+
+        heritage_kws = ["heritage", "since ", "founded", "history", "tradition", "legacy", "maison"]
+        heritage_count = sum(
+            1 for r in collection.reviews
+            if any(kw in r.text.lower() for kw in heritage_kws)
+        )
+        heritage_score = min(100, (heritage_count / total) * 1000)
+
+        composite = (
+            exclusivity_score * 0.25
+            + aspirational_score * 0.35
+            + heritage_score * 0.15
+            + (min(100, (resale_ratio or 0.5) * 100) * 0.25)
+        )
+
+        return LuxuryBrandIndex(
+            brand_name=brand.name,
+            resale_premium_ratio=resale_ratio or 0.0,
+            exclusivity_score=exclusivity_score,
+            aspirational_score=aspirational_score,
+            heritage_score=heritage_score,
+            composite=composite,
+        )
 
 
 def _compute_confidence(
     all_reviews: ReviewCollection,
     source_collections: dict[str, ReviewCollection],
 ) -> float:
-    """Confidence score based on data coverage and volume.
-
-    Factors:
-    1. Number of active data sources (out of 5 possible)
-    2. Total data volume (more data = higher confidence)
-    3. Temporal coverage (data spanning more days = better)
-    """
-    # Source coverage: 5 collectors maximum
-    source_score = min(1.0, len(source_collections) / 3)  # 3+ sources = full credit
-
-    # Volume: 50+ data points = full credit
+    source_score = min(1.0, len(source_collections) / 3)
     volume_score = min(1.0, all_reviews.count / 50)
-
-    # Temporal coverage: reviews spanning 30+ days = full credit
     if all_reviews.count >= 2:
         dates = sorted(r.timestamp for r in all_reviews.reviews)
         span_days = (dates[-1] - dates[0]).days
         temporal_score = min(1.0, span_days / 30)
     else:
         temporal_score = 0.0
-
-    return (source_score * 0.4 + volume_score * 0.3 + temporal_score * 0.3)
+    return source_score * 0.4 + volume_score * 0.3 + temporal_score * 0.3

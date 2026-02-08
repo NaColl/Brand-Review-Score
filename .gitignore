@@ -36,6 +36,6 @@ reports/
 *.csv
 !config/*.yaml
 
-# Model caches
+# Model caches (ML model weights, not src/models/)
 .cache/
-models/
+/models/
